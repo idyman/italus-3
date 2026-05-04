@@ -1,0 +1,41 @@
+@import './fonts.css';
+@import './tailwind.css';
+@import './theme.css';
+
+/* Site-wide motion polish */
+
+html {
+  scroll-behavior: smooth;
+}
+
+/* Buttons and anchors default to a gentle ease so every hover feels consistent */
+button,
+a {
+  transition-timing-function: cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+/* Images fade in as they finish decoding so freshly uploaded URLs don't pop */
+img {
+  animation: imgFadeIn 0.45s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+@keyframes imgFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* Respect the user's reduced-motion preference everywhere */
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
