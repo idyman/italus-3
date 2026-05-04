@@ -1,171 +1,210 @@
-import { useState } from "react";
-import { Plus, Trash2, GripVertical, AlertCircle, Check } from "lucide-react";
+import { useRef, useState } from "react";
+import { Plus, Trash2, GripVertical, Upload, Loader2, Link2, ChevronDown } from "lucide-react";
+import { Button } from "../ui/button";
+import { Input } from "../ui/input";
+import { Label } from "../ui/label";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../ui/collapsible";
 import type { MockupItem } from "../../App";
+import { uploadFile, deleteFileByUrl } from "../../../lib/uploadFile";
+import { toast } from "sonner";
+import { FirebaseImageUploader } from "./FirebaseImageUploader";
 
 interface MockupManagerProps {
   mockups: MockupItem[];
   onChange: (mockups: MockupItem[]) => void;
 }
 
-// Helper function to convert Imgur URLs to direct image links
-function normalizeImageUrl(url: string): string {
-  const trimmed = url.trim();
-  
-  // If empty, return as-is
-  if (!trimmed) return trimmed;
-  
-  console.log('🔄 [MockupManager] Normalizing URL:', trimmed);
-  
-  // If it's already a direct image link, return it
-  if (/\.(jpg|jpeg|png|gif|webp|svg)$/i.test(trimmed)) {
-    console.log('✅ [MockupManager] Already has image extension:', trimmed);
-    return trimmed;
-  }
-  
-  // Handle imgur.com/xyz format (no file extension)
-  const imgurMatch = trimmed.match(/imgur\.com\/([a-zA-Z0-9]+)$/);
-  if (imgurMatch) {
-    const normalized = `https://i.imgur.com/${imgurMatch[1]}.jpg`;
-    console.log('✅ [MockupManager] Normalized imgur.com URL:', normalized);
-    return normalized;
-  }
-  
-  // Handle i.imgur.com/xyz format (no file extension)
-  const iImgurMatch = trimmed.match(/i\.imgur\.com\/([a-zA-Z0-9]+)$/);
-  if (iImgurMatch) {
-    const normalized = `https://i.imgur.com/${iImgurMatch[1]}.jpg`;
-    console.log('✅ [MockupManager] Normalized i.imgur.com URL:', normalized);
-    return normalized;
-  }
-  
-  // Handle URLs without protocol
-  if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://')) {
-    const withProtocol = 'https://' + trimmed;
-    console.log('⚠️ [MockupManager] Added https:// protocol:', withProtocol);
-    return normalizeImageUrl(withProtocol); // Recursively normalize
-  }
-  
-  console.log('⚠️ [MockupManager] URL unchanged:', trimmed);
-  return trimmed;
-}
-
 export function MockupManager({ mockups, onChange }: MockupManagerProps) {
-  const [newImageUrl, setNewImageUrl] = useState("");
-  const [newTitle, setNewTitle] = useState("");
-  const [imageLoadStatus, setImageLoadStatus] = useState<Record<string, 'loading' | 'success' | 'error'>>({});
+  const [isUploading, setIsUploading] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+  const [showUrlField, setShowUrlField] = useState(false);
+  const [pasteUrl, setPasteUrl] = useState("");
+  const [pasteTitle, setPasteTitle] = useState("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleImageLoad = (id: string) => {
-    setImageLoadStatus(prev => ({ ...prev, [id]: 'success' }));
+  const handleFilesSelected = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+
+    setIsUploading(true);
+    try {
+      const uploaded: MockupItem[] = [];
+      for (const file of Array.from(files)) {
+        try {
+          const url = await uploadFile(file, {
+            folder: "mockups",
+            maxSizeBytes: 10 * 1024 * 1024,
+            allowedMimePrefix: "image/",
+          });
+          uploaded.push({
+            id: `${Date.now()}-${uploaded.length}`,
+            imageUrl: url,
+          });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "Unknown error";
+          toast.error(`Failed to upload ${file.name}: ${message}`);
+        }
+      }
+      if (uploaded.length > 0) {
+        onChange([...mockups, ...uploaded]);
+        toast.success(`Added ${uploaded.length} mockup${uploaded.length === 1 ? "" : "s"}`);
+      }
+    } finally {
+      setIsUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
   };
 
-  const handleImageError = (id: string) => {
-    setImageLoadStatus(prev => ({ ...prev, [id]: 'error' }));
+  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsDragging(false);
+    if (isUploading) return;
+    handleFilesSelected(e.dataTransfer.files);
   };
 
-  const handleAddMockup = () => {
-    if (!newImageUrl.trim()) return;
-
-    const newMockup: MockupItem = {
-      id: Date.now().toString(),
-      imageUrl: normalizeImageUrl(newImageUrl.trim()),
-      title: newTitle.trim() || undefined,
-    };
-
-    onChange([...mockups, newMockup]);
-    setNewImageUrl("");
-    setNewTitle("");
-    setImageLoadStatus(prev => ({ ...prev, [newMockup.id]: 'loading' }));
+  const handleAddFromUrl = () => {
+    const trimmed = pasteUrl.trim();
+    if (!trimmed) return;
+    onChange([
+      ...mockups,
+      {
+        id: Date.now().toString(),
+        imageUrl: trimmed,
+        title: pasteTitle.trim() || undefined,
+      },
+    ]);
+    setPasteUrl("");
+    setPasteTitle("");
+    toast.success("Mockup added");
   };
 
-  const handleRemoveMockup = (id: string) => {
+  const handleRemoveMockup = async (id: string) => {
+    const removed = mockups.find((m) => m.id === id);
     onChange(mockups.filter((m) => m.id !== id));
-    const newStatus = { ...imageLoadStatus };
-    delete newStatus[id];
-    setImageLoadStatus(newStatus);
+    if (removed?.imageUrl) {
+      try {
+        await deleteFileByUrl(removed.imageUrl);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Storage cleanup failed";
+        toast.warning(`Mockup removed, but Storage cleanup failed: ${message}`);
+      }
+    }
   };
 
   const handleUpdateMockup = (id: string, field: "imageUrl" | "title", value: string) => {
-    const normalizedValue = field === "imageUrl" ? normalizeImageUrl(value) : value;
-    onChange(
-      mockups.map((m) =>
-        m.id === id ? { ...m, [field]: normalizedValue } : m
-      )
-    );
-    if (field === "imageUrl") {
-      setImageLoadStatus(prev => ({ ...prev, [id]: 'loading' }));
-    }
+    onChange(mockups.map((m) => (m.id === id ? { ...m, [field]: value } : m)));
   };
 
   return (
     <div className="space-y-4">
-      {/* INFO BOX */}
       <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
         <p className="text-sm text-purple-900">
-          📱 <strong>Add Multiple Mockups:</strong> You can add as many mockup screens as you want (6+). 
-          Add a URL, add a title, click "Add Mockup", then repeat for the next screen!
+          📱 <strong>Add Mockup Screens:</strong> Drop one or more screen images below — each one becomes a separate mockup. You can edit titles and re-upload images per mockup after.
         </p>
       </div>
 
-      <div className="space-y-2">
-        <label className="block text-sm font-medium">
-          Screen Image URL
-        </label>
-        <input
-          type="text"
-          value={newImageUrl}
-          onChange={(e) => setNewImageUrl(e.target.value)}
-          placeholder="https://i.imgur.com/xxxxx.png or imgur.com/xxxxx"
-          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-black focus:border-transparent text-sm"
-        />
-        <p className="text-xs text-gray-500">
-          📌 Use Imgur, Cloudinary, or imgbb to host your mockup images. Paste the direct image URL.
-        </p>
-      </div>
-
-      <div className="space-y-2">
-        <label className="block text-sm font-medium">
-          Title (optional)
-        </label>
-        <input
-          type="text"
-          value={newTitle}
-          onChange={(e) => setNewTitle(e.target.value)}
-          placeholder="Home Screen"
-          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-black focus:border-transparent text-sm"
-        />
-      </div>
-
-      <button
-        type="button"
-        onClick={handleAddMockup}
-        disabled={!newImageUrl.trim()}
-        className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-black text-white rounded-lg hover:bg-gray-800 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors text-sm"
+      {/* Primary uploader */}
+      <div
+        onDragOver={(e) => {
+          e.preventDefault();
+          if (!isUploading) setIsDragging(true);
+        }}
+        onDragLeave={() => setIsDragging(false)}
+        onDrop={handleDrop}
+        onClick={() => {
+          if (!isUploading) fileInputRef.current?.click();
+        }}
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => {
+          if ((e.key === "Enter" || e.key === " ") && !isUploading) {
+            e.preventDefault();
+            fileInputRef.current?.click();
+          }
+        }}
+        className={`flex flex-col items-center justify-center gap-3 rounded-lg border-2 border-dashed px-4 py-10 text-center cursor-pointer transition-colors ${
+          isDragging
+            ? "border-black bg-gray-50"
+            : "border-gray-300 hover:border-gray-400 hover:bg-gray-50"
+        } ${isUploading ? "opacity-60 cursor-not-allowed" : ""}`}
       >
-        <Plus className="w-4 h-4" />
-        {mockups.length === 0 ? 'Add First Mockup' : `Add Mockup #${mockups.length + 1}`}
-      </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          multiple
+          className="hidden"
+          onChange={(e) => handleFilesSelected(e.target.files)}
+          disabled={isUploading}
+        />
+        {isUploading ? (
+          <>
+            <Loader2 className="w-7 h-7 text-gray-500 animate-spin" />
+            <span className="text-sm font-medium text-gray-700">Uploading…</span>
+          </>
+        ) : (
+          <>
+            <Upload className="w-7 h-7 text-gray-500" />
+            <div>
+              <span className="text-base font-medium text-gray-800">
+                {mockups.length === 0 ? "Drop screen images here" : `Add mockup #${mockups.length + 1}`}, or <span className="underline">browse</span>
+              </span>
+              <p className="text-xs text-gray-500 mt-1">
+                JPG, PNG, GIF, WebP, or SVG · up to 10&nbsp;MB each · multiple files allowed
+              </p>
+            </div>
+          </>
+        )}
+      </div>
 
-      {mockups.length > 0 && mockups.length < 6 && (
-        <div className="bg-green-50 border border-green-200 rounded-lg p-3">
-          <p className="text-xs text-green-800">
-            ✅ Great! You have {mockups.length} mockup{mockups.length !== 1 ? 's' : ''}. 
-            Keep going - add more URLs above to add mockups #{mockups.length + 1}, #{mockups.length + 2}, etc.
-          </p>
-        </div>
-      )}
-
-      {mockups.length >= 6 && (
-        <div className="bg-purple-50 border border-purple-200 rounded-lg p-3">
-          <p className="text-xs text-purple-800">
-            🎉 Awesome! You have {mockups.length} mockups. You can still add more if needed!
-          </p>
-        </div>
-      )}
+      <Collapsible open={showUrlField} onOpenChange={setShowUrlField}>
+        <CollapsibleTrigger asChild>
+          <button
+            type="button"
+            className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-700 transition-colors"
+          >
+            <Link2 className="w-3 h-3" />
+            {showUrlField ? "Hide URL field" : "Use URL instead"}
+            <ChevronDown className={`w-3 h-3 transition-transform ${showUrlField ? "rotate-180" : ""}`} />
+          </button>
+        </CollapsibleTrigger>
+        <CollapsibleContent className="pt-2 space-y-2">
+          <div className="space-y-2">
+            <Label className="text-xs">Screen Image URL</Label>
+            <Input
+              type="url"
+              value={pasteUrl}
+              onChange={(e) => setPasteUrl(e.target.value)}
+              placeholder="https://i.imgur.com/xxxxx.png"
+              className="text-sm font-mono"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label className="text-xs">Title (optional)</Label>
+            <Input
+              type="text"
+              value={pasteTitle}
+              onChange={(e) => setPasteTitle(e.target.value)}
+              placeholder="Home Screen"
+              className="text-sm"
+            />
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={handleAddFromUrl}
+            disabled={!pasteUrl.trim()}
+            className="gap-1 w-full"
+          >
+            <Plus size={14} />
+            Add from URL
+          </Button>
+        </CollapsibleContent>
+      </Collapsible>
 
       {mockups.length > 0 && (
         <div className="space-y-3 mt-6">
           <h4 className="text-sm font-medium">Mockups ({mockups.length})</h4>
-          {mockups.map((mockup) => (
+          {mockups.map((mockup, idx) => (
             <div
               key={mockup.id}
               className="border border-gray-200 rounded-lg p-4 space-y-3 bg-white"
@@ -174,73 +213,29 @@ export function MockupManager({ mockups, onChange }: MockupManagerProps) {
                 <div className="flex-shrink-0 mt-2 cursor-move text-gray-400">
                   <GripVertical className="w-4 h-4" />
                 </div>
-                
-                <div className="flex-1 space-y-3">
-                  {/* Preview */}
-                  {mockup.imageUrl && (
-                    <div className="relative w-full h-48 bg-gray-100 rounded-lg overflow-hidden">
-                      {(!imageLoadStatus[mockup.id] || imageLoadStatus[mockup.id] === 'loading') && (
-                        <div className="absolute inset-0 flex items-center justify-center bg-gray-100 z-10">
-                          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-black"></div>
-                        </div>
-                      )}
-                      {imageLoadStatus[mockup.id] === 'error' && (
-                        <div className="absolute inset-0 flex flex-col items-center justify-center bg-red-50 text-red-600 z-10">
-                          <AlertCircle className="w-8 h-8 mb-2" />
-                          <span className="text-sm font-medium">Image failed to load</span>
-                          <span className="text-xs">Check URL below</span>
-                        </div>
-                      )}
-                      {imageLoadStatus[mockup.id] === 'success' && (
-                        <div className="absolute top-2 right-2 bg-green-500 rounded-full p-1 z-10">
-                          <Check className="w-4 h-4 text-white" />
-                        </div>
-                      )}
-                      <img
-                        src={mockup.imageUrl}
-                        alt={mockup.title || "Screen preview"}
-                        className="w-full h-full object-contain"
-                        onLoad={() => handleImageLoad(mockup.id)}
-                        onError={() => handleImageError(mockup.id)}
-                      />
-                    </div>
-                  )}
 
-                  {/* Image URL */}
-                  <div className="space-y-1">
-                    <label className="block text-xs font-medium text-gray-700">
-                      Screen Image URL
-                    </label>
-                    <input
-                      type="text"
-                      value={mockup.imageUrl}
-                      onChange={(e) =>
-                        handleUpdateMockup(mockup.id, "imageUrl", e.target.value)
-                      }
-                      placeholder="https://i.imgur.com/xxxxx.png"
-                      className="w-full px-3 py-1.5 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-black focus:border-transparent font-mono"
-                    />
-                    {imageLoadStatus[mockup.id] === 'error' && (
-                      <p className="text-xs text-red-600 flex items-center gap-1">
-                        <AlertCircle className="w-3 h-3" />
-                        Image failed to load. Verify the URL is a direct image link.
-                      </p>
-                    )}
+                <div className="flex-1 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-gray-700">Mockup {idx + 1}</span>
                   </div>
 
-                  {/* Title */}
+                  <FirebaseImageUploader
+                    value={mockup.imageUrl}
+                    onChange={(url) => handleUpdateMockup(mockup.id, "imageUrl", url)}
+                    folder="mockups"
+                    previewClassName="w-full h-48"
+                    previewObjectFit="contain"
+                    previewAlt={mockup.title || `Screen ${idx + 1}`}
+                  />
+
                   <div className="space-y-1">
-                    <label className="block text-xs font-medium text-gray-700">
-                      Title (optional)
-                    </label>
-                    <input
+                    <Label className="text-xs">Title (optional)</Label>
+                    <Input
                       type="text"
                       value={mockup.title || ""}
-                      onChange={(e) =>
-                        handleUpdateMockup(mockup.id, "title", e.target.value)
-                      }
+                      onChange={(e) => handleUpdateMockup(mockup.id, "title", e.target.value)}
                       placeholder="Home Screen"
-                      className="w-full px-3 py-1.5 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-black focus:border-transparent"
+                      className="text-sm"
                     />
                   </div>
                 </div>

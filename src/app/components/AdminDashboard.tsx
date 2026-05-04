@@ -18,7 +18,6 @@ import { MotionManager } from "./MotionManager";
 import { MockupManager } from "./admin/MockupManager";
 import { CaseStudyManager } from "./admin/CaseStudyManager";
 import { CVUploader } from "./admin/CVUploader";
-import { ImageUrlHelper } from "./admin/ImageUrlHelper";
 import { toast } from "sonner";
 
 interface AdminDashboardProps {
@@ -459,7 +458,6 @@ export function AdminDashboard({
                             </span>
                           )}
                         </Label>
-                        <ImageUrlHelper />
                         <ProjectImageManager
                           images={projectFormData.images}
                           onChange={(images) => {

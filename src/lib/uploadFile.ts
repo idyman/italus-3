@@ -1,4 +1,4 @@
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { storage } from './firebase';
 
 // Sanitize a filename so Storage paths stay URL-safe.
@@ -31,4 +31,23 @@ export async function uploadFile(file: File, options: UploadOptions): Promise<st
   const fileRef = ref(storage, path);
   await uploadBytes(fileRef, file, { contentType: file.type || undefined });
   return getDownloadURL(fileRef);
+}
+
+// True for download URLs that point at our Firebase Storage bucket.
+// External URLs (Imgur, Cloudinary, etc.) return false and are skipped on delete.
+function isFirebaseStorageUrl(url: string): boolean {
+  return (
+    url.includes('firebasestorage.googleapis.com') ||
+    url.includes('firebasestorage.app') ||
+    url.startsWith('gs://')
+  );
+}
+
+// Delete a file from Firebase Storage given its download URL.
+// No-op for empty strings or non-Firebase URLs. The Storage SDK accepts
+// download URLs directly via ref(), so we don't need to parse the path.
+export async function deleteFileByUrl(url: string): Promise<void> {
+  if (!url || !isFirebaseStorageUrl(url)) return;
+  const fileRef = ref(storage, url);
+  await deleteObject(fileRef);
 }
