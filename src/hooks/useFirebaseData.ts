@@ -73,7 +73,13 @@ function transformProjectToDb(project: Omit<Project, 'id'>): any {
     logos: project.logos || [],
     typography: project.typography || [],
     motion: project.motion || [],
-    mockups: project.mockups || [],
+    // Firestore rejects `undefined` even inside nested objects, so coerce
+    // each mockup's optional `title` to null before writing.
+    mockups: (project.mockups || []).map((m) => ({
+      id: m.id,
+      imageUrl: m.imageUrl,
+      title: m.title ?? null,
+    })),
     caseStudy: project.caseStudy ?? null,
     updatedAt: serverTimestamp(),
   };

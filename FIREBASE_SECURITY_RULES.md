@@ -88,13 +88,17 @@ service cloud.firestore {
 
 Console path: Firebase Console → Storage → **Rules** tab.
 
-The admin uploads to exactly three folders:
+The admin uploads to exactly five folders:
 
 | Folder      | What goes there                      | Max size | MIME type         |
 | ----------- | ------------------------------------ | -------- | ----------------- |
 | `projects/` | Project images (gallery, thumbnails) | 10 MB    | `image/*`         |
+| `logos/`    | Logo images per project              | 10 MB    | `image/*`         |
+| `mockups/`  | Device mockup screen images          | 10 MB    | `image/*`         |
 | `hero/`     | Hero background image                | 10 MB    | `image/*`         |
 | `cv/`       | CV / résumé                          | 20 MB    | `application/pdf` |
+
+> **If you deployed an earlier version of these rules**, you only have `projects/`, `hero/`, `cv/` allowed. Mockup and logo uploads will fail with a "permission denied" error in the toast. **Redeploy with the rules below** (or use Option A while testing) to fix.
 
 ### Option A — Open (dev/testing only)
 
@@ -117,18 +121,11 @@ Public read is required because the portfolio site loads images and the CV from 
 rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
-    // Project images — up to 10 MB, images only
-    match /projects/{file=**} {
+    // Image uploads — up to 10 MB, images only (projects, logos, mockups, hero)
+    match /{folder}/{file=**} {
       allow read: if true;
       allow write: if request.auth != null
-                   && request.resource.size < 10 * 1024 * 1024
-                   && request.resource.contentType.matches('image/.*');
-    }
-
-    // Hero background — up to 10 MB, images only
-    match /hero/{file=**} {
-      allow read: if true;
-      allow write: if request.auth != null
+                   && folder in ['projects', 'logos', 'mockups', 'hero']
                    && request.resource.size < 10 * 1024 * 1024
                    && request.resource.contentType.matches('image/.*');
     }
@@ -160,16 +157,11 @@ service firebase.storage {
              request.auth.token.email == 'itamardesign@gmail.com';
     }
 
-    match /projects/{file=**} {
+    // Image uploads — up to 10 MB, images only (projects, logos, mockups, hero)
+    match /{folder}/{file=**} {
       allow read: if true;
       allow write: if isAdmin()
-                   && request.resource.size < 10 * 1024 * 1024
-                   && request.resource.contentType.matches('image/.*');
-    }
-
-    match /hero/{file=**} {
-      allow read: if true;
-      allow write: if isAdmin()
+                   && folder in ['projects', 'logos', 'mockups', 'hero']
                    && request.resource.size < 10 * 1024 * 1024
                    && request.resource.contentType.matches('image/.*');
     }
