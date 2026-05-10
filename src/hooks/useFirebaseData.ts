@@ -13,6 +13,7 @@ import {
   serverTimestamp
 } from 'firebase/firestore';
 import { db } from '../lib/firebase';
+import { toast } from 'sonner';
 import type { Project, PageSettings, CVData } from '../app/App';
 
 // Safely write to localStorage; swallow quota/serialization errors so the UI never crashes.
@@ -191,13 +192,14 @@ export function useProjects() {
     } catch (error: any) {
       console.warn('⚠️ Firebase unavailable - using localStorage only:', error.message);
       console.info('💡 To enable Firebase sync, configure Firestore security rules (see FIREBASE_SECURITY_RULES.md)');
-      
+      toast.error(`Project save failed (saved locally only): ${error.message ?? 'unknown error'}`);
+
       // Fallback to localStorage
       const newProject = transformProject(projectData, Date.now().toString());
       const updatedProjects = [newProject, ...projects];
       setProjects(updatedProjects);
       safeLocalStorageSet('projects', updatedProjects);
-      
+
       return { id: newProject.id };
     }
   };
@@ -223,13 +225,14 @@ export function useProjects() {
     } catch (error: any) {
       console.warn('⚠️ Firebase unavailable - using localStorage only:', error.message);
       console.info('💡 To enable Firebase sync, configure Firestore security rules (see FIREBASE_SECURITY_RULES.md)');
-      
+      toast.error(`Project update failed (saved locally only): ${error.message ?? 'unknown error'}`);
+
       // Fallback to localStorage
       const updatedProject = transformProject(projectData, id);
       const updatedProjects = projects.map(p => p.id === id ? updatedProject : p);
       setProjects(updatedProjects);
       safeLocalStorageSet('projects', updatedProjects);
-      
+
       return updatedProject;
     }
   };
